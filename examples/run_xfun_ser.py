@@ -4,7 +4,7 @@
 import logging
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '6'
+os.environ['CUDA_VISIBLE_DEVICES'] = '5'
 os.environ["WANDB_DISABLED"] = "true"
 
 import sys
@@ -16,6 +16,7 @@ print(os.path.dirname(os.path.abspath(__file__)))
 import time
 from dataclasses import dataclass, field
 from typing import Optional
+from seqeval.metrics import classification_report
 import numpy as np
 from datasets import ClassLabel, load_dataset, load_metric
 
@@ -222,6 +223,7 @@ def main():
         ]
 
         results = metric.compute(predictions=true_predictions, references=true_labels)
+        print(classification_report(true_labels, true_predictions))
         if data_args.return_entity_level_metrics:
             # Unpack nested dictionaries
             final_results = {}

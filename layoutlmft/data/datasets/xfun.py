@@ -8,14 +8,18 @@ import datasets
 from layoutlmft.data.utils import load_image, merge_bbox, normalize_bbox, simplify_bbox
 from transformers import AutoTokenizer
 
-_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format/")
+_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format-v2/")
 print(_URL)
 
 _LANG = ["zh", "de", "es", "fr", "en", "it", "ja", "pt"]
 logger = logging.getLogger(__name__)
 
 labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
-ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
+# ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
+ner_labels = ['S-name', 'E-name', 'E-company', 'B-total', 'I-cnt', 'I-total', 'I-date', 'E-cnt', 'S-price', 'O',
+              'B-name', 'S-cnt', 'S-total', 'E-total', 'B-date', 'I-price', 'E-date', 'E-price', 'B-cnt', 'B-company',
+              'I-name', 'B-price', 'I-company']
+
 
 class XFUNConfig(datasets.BuilderConfig):
     """BuilderConfig for XFUN."""
@@ -105,7 +109,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
             with open(filepath[0], "r") as f:
                 data = json.load(f)
 
-            for doc in data["documents"][:20]:
+            for doc in data["documents"]:
                 doc["img"]["fpath"] = os.path.join(filepath[1], doc["img"]["fname"])
                 image, size = load_image(doc["img"]["fpath"])
                 document = doc["document"]
@@ -115,7 +119,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                 entity_id_to_index_map = {}
                 empty_entity = set()
                 for line in document:
-                    if len(line["text"]) == 0:
+                    if len(line["text"].strip()) == 0:
                         empty_entity.add(line["id"])
                         continue
 
@@ -149,6 +153,13 @@ class XFUN(datasets.GeneratorBasedBuilder):
                         [bbox[i + 1][0], bbox[i + 1][1], bbox[i + 1][0], bbox[i + 1][1]] if b is None else b
                         for i, b in enumerate(bbox)
                     ]
+                    # bbox中可能有负值
+                    for jj, box in enumerate(bbox):
+                        for ii, v in enumerate(box):
+                            if v < 0:
+                                bbox[jj][ii] = 0
+                                print('bbox contain value < 0 !')
+
                     if line["label"] == "other":
                         label = ["O"] * len(bbox)
                     else:
@@ -165,6 +176,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                         labels.add(l)
 
                     tokenized_inputs.update({"bbox": bbox, "labels": label})
+
                     if label[0] != "O":
                         # entity_id_to_index_map:每个实体对应一个唯一id，为每个id按照顺序重新索引
                         entity_id_to_index_map[line["id"]] = len(entities)
@@ -209,7 +221,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
 
 
 def generate_examples():
-    filepaths = [['/work/Datasets/Doc-understanding/invoice_data/xfund-format/zh.test.json',
+    filepaths = [['/work/Datasets/Doc-understanding/invoice_data/xfund-format/zh.train.json',
                   '/work/Datasets/Doc-understanding/invoice_data/xfund-format']]
 
     tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
@@ -225,7 +237,7 @@ def generate_examples():
         for doc in data["documents"]:
             doc["img"]["fpath"] = os.path.join(filepath[1], doc["img"]["fname"])
             print('--' * 50)
-            print(doc['img']['fpath'])
+            # print(doc['img']['fpath'])
             image, size = load_image(doc["img"]["fpath"])
             document = doc["document"]
             tokenized_doc = {"input_ids": [], "bbox": [], "labels": []}
@@ -237,7 +249,7 @@ def generate_examples():
                 # if line['text'].startswith('Here is yet another version of the quest'):
                 #     print(1 + 2)
 
-                if len(line["text"]) == 0:
+                if len(line["text"].strip()) == 0:
                     empty_entity.add(line["id"])
                     continue
 
@@ -271,10 +283,17 @@ def generate_examples():
                         tmp_box = last_box
                     bbox.append(normalize_bbox(merge_bbox(tmp_box), size))
                     last_box = tmp_box
+
                 bbox = [
                     [bbox[i + 1][0], bbox[i + 1][1], bbox[i + 1][0], bbox[i + 1][1]] if b is None else b
                     for i, b in enumerate(bbox)
                 ]
+                # bbox中可能有负值
+                for jj, box in enumerate(bbox):
+                    for ii, v in enumerate(box):
+                        if v < 0:
+                            bbox[jj][ii] = 0
+                            print('bbox contain value < 0 !')
                 if line["label"] == "other":
                     label = ["O"] * len(bbox)
                 else:
@@ -290,6 +309,7 @@ def generate_examples():
                 for l in label:
                     seq_labels.add(l)
                 tokenized_inputs.update({"bbox": bbox, "labels": label})
+
                 if label[0] != "O":
                     entity_id_to_index_map[line["id"]] = len(entities)
                     entities.append(
