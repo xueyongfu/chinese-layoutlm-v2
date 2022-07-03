@@ -8,13 +8,14 @@ import datasets
 from layoutlmft.data.utils import load_image, merge_bbox, normalize_bbox, simplify_bbox
 from transformers import AutoTokenizer
 
-
-_URL = os.path.join(os.getcwd(), "../DATA/xfund-and-funsd/XFUND-and-FUNSD/")
+_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format/")
 print(_URL)
 
 _LANG = ["zh", "de", "es", "fr", "en", "it", "ja", "pt"]
 logger = logging.getLogger(__name__)
 
+labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
+ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
 
 class XFUNConfig(datasets.BuilderConfig):
     """BuilderConfig for XFUN."""
@@ -46,7 +47,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                     "bbox": datasets.Sequence(datasets.Sequence(datasets.Value("int64"))),
                     "labels": datasets.Sequence(
                         datasets.ClassLabel(
-                            names=["O", "B-QUESTION", "B-ANSWER", "B-HEADER", "I-ANSWER", "I-QUESTION", "I-HEADER"]
+                            names=ner_labels
                         )
                     ),
                     "image": datasets.Array3D(shape=(3, 224, 224), dtype="uint8"),
@@ -54,17 +55,10 @@ class XFUN(datasets.GeneratorBasedBuilder):
                         {
                             "start": datasets.Value("int64"),
                             "end": datasets.Value("int64"),
-                            "label": datasets.ClassLabel(names=["HEADER", "QUESTION", "ANSWER"]),
+                            "label": datasets.ClassLabel(names=labels),
                         }
                     ),
-                    "relations": datasets.Sequence(
-                        {
-                            "head": datasets.Value("int64"),
-                            "tail": datasets.Value("int64"),
-                            "start_index": datasets.Value("int64"),
-                            "end_index": datasets.Value("int64"),
-                        }
-                    ),
+
                 }
             ),
             supervised_keys=None,
@@ -74,8 +68,8 @@ class XFUN(datasets.GeneratorBasedBuilder):
         """Returns SplitGenerators."""
         urls_to_download = {
             "train": [f"{_URL}{self.config.lang}.train.json", f"{_URL}{self.config.lang}.train.zip"],
-            "val": [f"{_URL}{self.config.lang}.val.json", f"{_URL}{self.config.lang}.val.zip"],
-            "test": [f"{_URL}{self.config.lang}.val.json", f"{_URL}{self.config.lang}.val.zip"],
+            "val": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
+            "test": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
         }
         downloaded_files = dl_manager.download_and_extract(urls_to_download)
         train_files_for_many_langs = [downloaded_files["train"]]
@@ -104,28 +98,27 @@ class XFUN(datasets.GeneratorBasedBuilder):
 
     def _generate_examples(self, filepaths):
         print(filepaths)
+        labels = set()
 
         for filepath in filepaths:
             logger.info("Generating examples from = %s", filepath)
             with open(filepath[0], "r") as f:
                 data = json.load(f)
 
-            for doc in data["documents"]:
+            for doc in data["documents"][:20]:
                 doc["img"]["fpath"] = os.path.join(filepath[1], doc["img"]["fname"])
                 image, size = load_image(doc["img"]["fpath"])
                 document = doc["document"]
                 tokenized_doc = {"input_ids": [], "bbox": [], "labels": []}
                 entities = []
-                relations = []
-                id2label = {}
+
                 entity_id_to_index_map = {}
                 empty_entity = set()
                 for line in document:
                     if len(line["text"]) == 0:
                         empty_entity.add(line["id"])
                         continue
-                    id2label[line["id"]] = line["label"]
-                    relations.extend([tuple(sorted(l)) for l in line["linking"]])
+
                     tokenized_inputs = self.tokenizer(
                         line["text"],
                         add_special_tokens=False,
@@ -159,8 +152,18 @@ class XFUN(datasets.GeneratorBasedBuilder):
                     if line["label"] == "other":
                         label = ["O"] * len(bbox)
                     else:
-                        label = [f"I-{line['label'].upper()}"] * len(bbox)
-                        label[0] = f"B-{line['label'].upper()}"
+                        if len(bbox) == 1:
+                            label = [f"S-{line['label']}"]
+                        else:
+                            label = [f"I-{line['label']}"] * len(bbox)
+                            if line['start_flag']:
+                                label[0] = f"B-{line['label']}"
+                            if line['end_flag']:
+                                label[-1] = f"E-{line['label']}"
+
+                    for l in label:
+                        labels.add(l)
+
                     tokenized_inputs.update({"bbox": bbox, "labels": label})
                     if label[0] != "O":
                         # entity_id_to_index_map:每个实体对应一个唯一id，为每个id按照顺序重新索引
@@ -169,46 +172,12 @@ class XFUN(datasets.GeneratorBasedBuilder):
                             {
                                 "start": len(tokenized_doc["input_ids"]),
                                 "end": len(tokenized_doc["input_ids"]) + len(tokenized_inputs["input_ids"]),
-                                "label": line["label"].upper(),
+                                "label": line["label"],
                             }
                         )
                     for i in tokenized_doc:
                         tokenized_doc[i] = tokenized_doc[i] + tokenized_inputs[i]
-                relations = list(set(relations))
-                relations = [rel for rel in relations if rel[0] not in empty_entity and rel[1] not in empty_entity]
-                kvrelations = []
-                for rel in relations:
-                    pair = [id2label[rel[0]], id2label[rel[1]]]
-                    if pair == ["question", "answer"]:
-                        kvrelations.append(
-                            {"head": entity_id_to_index_map[rel[0]], "tail": entity_id_to_index_map[rel[1]]}
-                        )
-                    elif pair == ["answer", "question"]:
-                        kvrelations.append(
-                            {"head": entity_id_to_index_map[rel[1]], "tail": entity_id_to_index_map[rel[0]]}
-                        )
-                    else:
-                        continue
 
-                def get_relation_span(rel):
-                    bound = []
-                    for entity_index in [rel["head"], rel["tail"]]:
-                        bound.append(entities[entity_index]["start"])
-                        bound.append(entities[entity_index]["end"])
-                    return min(bound), max(bound)
-
-                relations = sorted(
-                    [
-                        {
-                            "head": rel["head"],
-                            "tail": rel["tail"],
-                            "start_index": get_relation_span(rel)[0],
-                            "end_index": get_relation_span(rel)[1],
-                        }
-                        for rel in kvrelations
-                    ],
-                    key=lambda x: x["head"],
-                )
                 chunk_size = 512
                 for chunk_id, index in enumerate(range(0, len(tokenized_doc["input_ids"]), chunk_size)):
                     item = {}
@@ -227,41 +196,27 @@ class XFUN(datasets.GeneratorBasedBuilder):
                             entity["end"] = entity["end"] - index
                             global_to_local_map[entity_id] = len(entities_in_this_span)
                             entities_in_this_span.append(entity)
-                    relations_in_this_span = []
-                    for relation in relations:
-                        # relation_span: start_index前实体的start，end_index尾实体的end
-                        if (
-                                index <= relation["start_index"] < index + chunk_size
-                                and index <= relation["end_index"] < index + chunk_size
-                        ):
-                            relations_in_this_span.append(
-                                {
-                                    "head": global_to_local_map[relation["head"]],  # 切分后的头实体的索引
-                                    "tail": global_to_local_map[relation["tail"]],  # 切分后的尾实体的索引
-                                    "start_index": relation["start_index"] - index,
-                                    "end_index": relation["end_index"] - index,
-                                }
-                            )
+
                     item.update(
                         {
                             "id": f"{doc['id']}_{chunk_id}",
                             "image": image,
                             "entities": entities_in_this_span,
-                            "relations": relations_in_this_span,
+
                         }
                     )
                     yield f"{doc['id']}_{chunk_id}", item
 
 
 def generate_examples():
-    filepaths = [['/work/Codes/layoutlmft/examples/XFUND-DATA-Gartner/zh.val.json',
-                  '/work/Codes/layoutlmft/examples/XFUND-DATA-Gartner/zh.val']]
+    filepaths = [['/work/Datasets/Doc-understanding/invoice_data/xfund-format/zh.test.json',
+                  '/work/Datasets/Doc-understanding/invoice_data/xfund-format']]
 
     tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
     # labels = ['OTHER', 'QUESTION', 'ANSWER', 'KV']
     # label2id = {label: index for index, label in enumerate(labels)}
     # id2label = {index: label for index, label in enumerate(labels)}
-
+    seq_labels = set()
     for filepath in filepaths:
         logger.info("Generating examples from = %s", filepath)
         with open(filepath[0], "r") as f:
@@ -275,8 +230,7 @@ def generate_examples():
             document = doc["document"]
             tokenized_doc = {"input_ids": [], "bbox": [], "labels": []}
             entities = []
-            relations = []
-            id2label = {}
+
             entity_id_to_index_map = {}
             empty_entity = set()
             for line in document:
@@ -286,8 +240,7 @@ def generate_examples():
                 if len(line["text"]) == 0:
                     empty_entity.add(line["id"])
                     continue
-                id2label[line["id"]] = line["label"]
-                relations.extend([tuple(sorted(l)) for l in line["linking"]])
+
                 tokenized_inputs = tokenizer(
                     line["text"],
                     add_special_tokens=False,
@@ -298,7 +251,7 @@ def generate_examples():
                 ocr_length = 0
                 bbox = []
                 last_box = None
-                print(line['text'])
+
                 for token_id, offset in zip(tokenized_inputs["input_ids"], tokenized_inputs["offset_mapping"]):
                     if token_id == 6:
                         # None的坐标，使用下个bbox的[bbox[i + 1][0], bbox[i + 1][1], bbox[i + 1][0], bbox[i + 1][1]]
@@ -325,8 +278,17 @@ def generate_examples():
                 if line["label"] == "other":
                     label = ["O"] * len(bbox)
                 else:
-                    label = [f"I-{line['label'].upper()}"] * len(bbox)
-                    label[0] = f"B-{line['label'].upper()}"
+                    if len(bbox) == 1:
+                        label = [f"S-{line['label']}"]
+                    else:
+                        label = [f"I-{line['label']}"] * len(bbox)
+                        if line['start_flag']:
+                            label[0] = f"B-{line['label']}"
+                        if line['end_flag']:
+                            label[-1] = f"E-{line['label']}"
+
+                for l in label:
+                    seq_labels.add(l)
                 tokenized_inputs.update({"bbox": bbox, "labels": label})
                 if label[0] != "O":
                     entity_id_to_index_map[line["id"]] = len(entities)
@@ -334,46 +296,12 @@ def generate_examples():
                         {
                             "start": len(tokenized_doc["input_ids"]),
                             "end": len(tokenized_doc["input_ids"]) + len(tokenized_inputs["input_ids"]),
-                            "label": line["label"].upper(),
+                            "label": line["label"],
                         }
                     )
                 for i in tokenized_doc:
                     tokenized_doc[i] = tokenized_doc[i] + tokenized_inputs[i]
-            relations = list(set(relations))
-            relations = [rel for rel in relations if rel[0] not in empty_entity and rel[1] not in empty_entity]
-            kvrelations = []
-            for rel in relations:
-                pair = [id2label[rel[0]], id2label[rel[1]]]
-                if pair == ["question", "answer"]:
-                    kvrelations.append(
-                        {"head": entity_id_to_index_map[rel[0]], "tail": entity_id_to_index_map[rel[1]]}
-                    )
-                elif pair == ["answer", "question"]:
-                    kvrelations.append(
-                        {"head": entity_id_to_index_map[rel[1]], "tail": entity_id_to_index_map[rel[0]]}
-                    )
-                else:
-                    continue
 
-            def get_relation_span(rel):
-                bound = []  # 获取两个实体间的最大距离的位置坐标
-                for entity_index in [rel["head"], rel["tail"]]:
-                    bound.append(entities[entity_index]["start"])
-                    bound.append(entities[entity_index]["end"])
-                return min(bound), max(bound)
-
-            relations = sorted(
-                [
-                    {
-                        "head": rel["head"],
-                        "tail": rel["tail"],
-                        "start_index": get_relation_span(rel)[0],
-                        "end_index": get_relation_span(rel)[1],
-                    }
-                    for rel in kvrelations
-                ],
-                key=lambda x: x["head"],
-            )
             chunk_size = 512  # 512
             overlap = 20
             for chunk_id, index in enumerate(range(0, len(tokenized_doc["input_ids"]), chunk_size)):
@@ -391,31 +319,17 @@ def generate_examples():
                         entity["end"] = entity["end"] - index
                         global_to_local_map[entity_id] = len(entities_in_this_span)
                         entities_in_this_span.append(entity)
-                relations_in_this_span = []
 
-                for relation in relations:
-                    if (
-                            index <= relation["start_index"] < index + chunk_size
-                            and index <= relation["end_index"] < index + chunk_size
-                    ):
-                        relations_in_this_span.append(
-                            {
-                                "head": global_to_local_map[relation["head"]],
-                                "tail": global_to_local_map[relation["tail"]],
-                                "start_index": relation["start_index"] - index,
-                                "end_index": relation["end_index"] - index,
-                            }
-                        )
                 item.update(
                     {
                         "id": f"{doc['id']}_{chunk_id}",
                         "image": image,
                         "entities": entities_in_this_span,
-                        "relations": relations_in_this_span,
                     }
                 )
                 # print(item)
                 # yield f"{doc['id']}_{chunk_id}", item
+    print(seq_labels)
 
 
 if __name__ == '__main__':
