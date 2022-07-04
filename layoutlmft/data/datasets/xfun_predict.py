@@ -8,12 +8,17 @@ import datasets
 from layoutlmft.data.utils import load_image, merge_bbox, normalize_bbox, simplify_bbox
 from transformers import AutoTokenizer
 
-
-_URL = os.path.join(os.getcwd(), "../DATA/xfund-and-funsd/XFUND-and-FUNSD/")
+_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format/")
 print(_URL)
 
 _LANG = ["zh", "de", "es", "fr", "en", "it", "ja", "pt"]
 logger = logging.getLogger(__name__)
+
+labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
+# ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
+ner_labels = {'B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
+              'B-total', 'I-date', 'I-name', 'S-cnt', 'B-name', 'E-total', 'I-price', 'S-price', 'E-company', 'E-price',
+              'O', 'I-cnt', 'B-cnt'}
 
 
 class XFUNConfig(datasets.BuilderConfig):
@@ -46,7 +51,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                     "bbox": datasets.Sequence(datasets.Sequence(datasets.Value("int64"))),
                     "labels": datasets.Sequence(
                         datasets.ClassLabel(
-                            names=["O", "B-QUESTION", "B-ANSWER", "B-HEADER", "I-ANSWER", "I-QUESTION", "I-HEADER"]
+                            names=ner_labels
                         )
                     ),
                     "image": datasets.Array3D(shape=(3, 224, 224), dtype="uint8"),
@@ -54,7 +59,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                         {
                             "start": datasets.Value("int64"),
                             "end": datasets.Value("int64"),
-                            "label": datasets.ClassLabel(names=["HEADER", "QUESTION", "ANSWER"]),
+                            "label": datasets.ClassLabel(names=labels),
                         }
                     ),
                     "relations": datasets.Sequence(
@@ -73,7 +78,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
     def _split_generators(self, dl_manager):
         """Returns SplitGenerators."""
         urls_to_download = {
-            "test": [f"{_URL}{self.config.lang}.val.json", f"{_URL}{self.config.lang}.val.zip"],
+            "test": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
             # "test": [f"{_URL}{self.config.lang}.val.json", f"{_URL}{self.config.lang}.val.align.zip"],
         }
         downloaded_files = dl_manager.download_and_extract(urls_to_download)
@@ -144,8 +149,8 @@ class XFUN(datasets.GeneratorBasedBuilder):
                     if line["label"] == "other":
                         label = ["O"] * len(bbox)
                     else:
-                        label = [f"I-{line['label'].upper()}"] * len(bbox)
-                        label[0] = f"B-{line['label'].upper()}"
+                        label = [f"I-{line['label']}"] * len(bbox)
+                        label[0] = f"B-{line['label']}"
                     tokenized_inputs.update({"bbox": bbox, "labels": label})
                     if label[0] != "O":
                         # entity_id_to_index_map:每个实体对应一个唯一id，为每个id按照顺序重新索引
@@ -154,7 +159,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                             {
                                 "start": len(tokenized_doc["input_ids"]),
                                 "end": len(tokenized_doc["input_ids"]) + len(tokenized_inputs["input_ids"]),
-                                "label": line["label"].upper(),
+                                "label": line["label"],
                             }
                         )
                     for i in tokenized_doc:
@@ -310,8 +315,8 @@ def generate_examples():
                 if line["label"] == "other":
                     label = ["O"] * len(bbox)
                 else:
-                    label = [f"I-{line['label'].upper()}"] * len(bbox)
-                    label[0] = f"B-{line['label'].upper()}"
+                    label = [f"I-{line['label']}"] * len(bbox)
+                    label[0] = f"B-{line['label']}"
                 tokenized_inputs.update({"bbox": bbox, "labels": label})
                 if label[0] != "O":
                     entity_id_to_index_map[line["id"]] = len(entities)
@@ -319,7 +324,7 @@ def generate_examples():
                         {
                             "start": len(tokenized_doc["input_ids"]),
                             "end": len(tokenized_doc["input_ids"]) + len(tokenized_inputs["input_ids"]),
-                            "label": line["label"].upper(),
+                            "label": line["label"],
                         }
                     )
                 for i in tokenized_doc:

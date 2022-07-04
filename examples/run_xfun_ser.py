@@ -4,11 +4,10 @@
 import logging
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '5'
+os.environ['CUDA_VISIBLE_DEVICES'] = '7'
 os.environ["WANDB_DISABLED"] = "true"
 
 import sys
-
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 print(os.path.dirname(os.path.abspath(__file__)))
@@ -17,6 +16,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Optional
 from seqeval.metrics import classification_report
+import sklearn
 import numpy as np
 from datasets import ClassLabel, load_dataset, load_metric
 
@@ -38,16 +38,13 @@ from transformers import (
 from transformers.trainer_utils import get_last_checkpoint, is_main_process
 from transformers.utils import check_min_version
 
-
 # Will error if the minimal version of Transformers is not installed. Remove at your own risks.
 check_min_version("4.5.0")
 
 logger = logging.getLogger(__name__)
 
 
-
 def main():
-
     parser = HfArgumentParser((ModelArguments, XFUNDataTrainingArguments, TrainingArguments))
     if len(sys.argv) == 2 and sys.argv[1].endswith(".json"):
         # If we pass only one argument to the script and it's the path to a json file,
@@ -221,8 +218,13 @@ def main():
             [label_list[l] for (p, l) in zip(prediction, label) if l != -100]
             for prediction, label in zip(predictions, labels)
         ]
+        # true_predictions_token_level = [l for seq in true_predictions for l in seq]
+        # true_labels_token_level = [l for seq in true_labels for l in seq]
+        # print('token level classification report !')
+        # print(sklearn.metrics.classification_report(true_labels_token_level, true_predictions_token_level))
 
         results = metric.compute(predictions=true_predictions, references=true_labels)
+        print('entity level classification report !')
         print(classification_report(true_labels, true_predictions))
         if data_args.return_entity_level_metrics:
             # Unpack nested dictionaries

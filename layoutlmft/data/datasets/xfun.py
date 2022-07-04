@@ -8,17 +8,16 @@ import datasets
 from layoutlmft.data.utils import load_image, merge_bbox, normalize_bbox, simplify_bbox
 from transformers import AutoTokenizer
 
-_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format-v2/")
+_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format-v3/")
 print(_URL)
 
 _LANG = ["zh", "de", "es", "fr", "en", "it", "ja", "pt"]
 logger = logging.getLogger(__name__)
 
 labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
-# ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
-ner_labels = ['S-name', 'E-name', 'E-company', 'B-total', 'I-cnt', 'I-total', 'I-date', 'E-cnt', 'S-price', 'O',
-              'B-name', 'S-cnt', 'S-total', 'E-total', 'B-date', 'I-price', 'E-date', 'E-price', 'B-cnt', 'B-company',
-              'I-name', 'B-price', 'I-company']
+ner_labels = {'B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
+              'B-total', 'I-date', 'I-name', 'S-cnt', 'B-name', 'E-total', 'I-price', 'S-price', 'E-company', 'E-price',
+              'O', 'I-cnt', 'B-cnt'}
 
 
 class XFUNConfig(datasets.BuilderConfig):
@@ -73,12 +72,12 @@ class XFUN(datasets.GeneratorBasedBuilder):
         urls_to_download = {
             "train": [f"{_URL}{self.config.lang}.train.json", f"{_URL}{self.config.lang}.train.zip"],
             "val": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
-            "test": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
+            # "test": [f"{_URL}{self.config.lang}.test.json", f"{_URL}{self.config.lang}.test.zip"],
         }
         downloaded_files = dl_manager.download_and_extract(urls_to_download)
         train_files_for_many_langs = [downloaded_files["train"]]
         val_files_for_many_langs = [downloaded_files["val"]]
-        test_files_for_many_langs = [downloaded_files["test"]]
+        # test_files_for_many_langs = [downloaded_files["test"]]
 
         if self.config.additional_langs:
             additional_langs = self.config.additional_langs.split("+")
@@ -97,7 +96,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
             datasets.SplitGenerator(
                 name=datasets.Split.VALIDATION, gen_kwargs={"filepaths": val_files_for_many_langs}
             ),
-            datasets.SplitGenerator(name=datasets.Split.TEST, gen_kwargs={"filepaths": test_files_for_many_langs}),
+            # datasets.SplitGenerator(name=datasets.Split.TEST, gen_kwargs={"filepaths": test_files_for_many_langs}),
         ]
 
     def _generate_examples(self, filepaths):
@@ -163,7 +162,7 @@ class XFUN(datasets.GeneratorBasedBuilder):
                     if line["label"] == "other":
                         label = ["O"] * len(bbox)
                     else:
-                        if len(bbox) == 1:
+                        if len(bbox) == 1 and line['start_flag'] and line['end_flag']:
                             label = [f"S-{line['label']}"]
                         else:
                             label = [f"I-{line['label']}"] * len(bbox)
@@ -297,7 +296,7 @@ def generate_examples():
                 if line["label"] == "other":
                     label = ["O"] * len(bbox)
                 else:
-                    if len(bbox) == 1:
+                    if len(bbox) == 1 and line['start_flag'] and line['end_flag']:
                         label = [f"S-{line['label']}"]
                     else:
                         label = [f"I-{line['label']}"] * len(bbox)
