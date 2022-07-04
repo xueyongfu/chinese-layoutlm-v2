@@ -16,9 +16,9 @@ logger = logging.getLogger(__name__)
 
 labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
 # ner_labels = ['O'] + [pre + '-' + label for label in labels for pre in ['B', 'I', 'E', 'S']]
-ner_labels = {'B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
+ner_labels = ['B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
               'B-total', 'I-date', 'I-name', 'S-cnt', 'B-name', 'E-total', 'I-price', 'S-price', 'E-company', 'E-price',
-              'O', 'I-cnt', 'B-cnt'}
+              'O', 'I-cnt', 'B-cnt']
 
 
 class XFUNConfig(datasets.BuilderConfig):

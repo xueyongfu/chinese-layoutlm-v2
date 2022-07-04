@@ -8,16 +8,16 @@ import datasets
 from layoutlmft.data.utils import load_image, merge_bbox, normalize_bbox, simplify_bbox
 from transformers import AutoTokenizer
 
-_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format-v3/")
+_URL = os.path.join(os.getcwd(), "/work/Datasets/Doc-understanding/invoice_data/xfund-format-v3/data/")
 print(_URL)
 
 _LANG = ["zh", "de", "es", "fr", "en", "it", "ja", "pt"]
 logger = logging.getLogger(__name__)
 
 labels = ['cnt', 'price', 'name', 'company', 'date', 'total']
-ner_labels = {'B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
+ner_labels = ['B-company', 'E-name', 'I-total', 'B-date', 'B-price', 'E-cnt', 'E-date', 'S-total', 'I-company',
               'B-total', 'I-date', 'I-name', 'S-cnt', 'B-name', 'E-total', 'I-price', 'S-price', 'E-company', 'E-price',
-              'O', 'I-cnt', 'B-cnt'}
+              'O', 'I-cnt', 'B-cnt']
 
 
 class XFUNConfig(datasets.BuilderConfig):
@@ -220,14 +220,15 @@ class XFUN(datasets.GeneratorBasedBuilder):
 
 
 def generate_examples():
-    filepaths = [['/work/Datasets/Doc-understanding/invoice_data/xfund-format/zh.train.json',
-                  '/work/Datasets/Doc-understanding/invoice_data/xfund-format']]
+    filepaths = [['/work/Datasets/Doc-understanding/invoice_data/xfund-format-v3/zh.train.json',
+                  '/work/Datasets/Doc-understanding/invoice_data/xfund-format-v3']]
 
     tokenizer = AutoTokenizer.from_pretrained("xlm-roberta-base")
     # labels = ['OTHER', 'QUESTION', 'ANSWER', 'KV']
     # label2id = {label: index for index, label in enumerate(labels)}
     # id2label = {index: label for index, label in enumerate(labels)}
     seq_labels = set()
+    items = []
     for filepath in filepaths:
         logger.info("Generating examples from = %s", filepath)
         with open(filepath[0], "r") as f:
@@ -346,8 +347,11 @@ def generate_examples():
                         "entities": entities_in_this_span,
                     }
                 )
+                items.append(item)
                 # print(item)
                 # yield f"{doc['id']}_{chunk_id}", item
+    with open('a.json', 'w') as f:
+        json.dump({'a': items}, f)
     print(seq_labels)
 
 
